@@ -1,12 +1,14 @@
 #!/usr/bin/env/ python
 
 """Service entry-point."""
+# Import libraries
 import json
 import logging
 
+from modules.dal import Project
+
 
 # Setup logger
-logging.basicConfig(level=logging.DEBUG, filename="logs/output.log", filemode="w")
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
