@@ -6,6 +6,7 @@ import json
 import logging
 
 from modules.dal import Project
+from modules.models import JSONFactory, JSONManifest
 
 
 # Setup logger
@@ -60,6 +61,15 @@ def main(event, context=None):
     # TODO: Generate reports
     reports = []
     for book in books:
-        pass
+        manifest = JSONManifest(book, rules)
+        logger.info(
+            'Generated manifest: %s', json.dumps(manifest.items, indent=2)
+        )
 
+        projection = JSONFactory(manifest).get_projection()
+        logger.info(
+            'Generated projection: %s', json.dumps(projection, indent=2)
+        )
+
+    # Reformat output and return
     return {'reports': reports}

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 """Service data access layer (dal)."""
+# Import libraries
 import os
 import json
 import logging

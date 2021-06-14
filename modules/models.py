@@ -1,10 +1,14 @@
 #!/usr/bin/env python
 
 """Service models and factories."""
+# Import libraries
 import re
 import logging
+import json
 from copy import copy
-from typing import Generator, List, Any
+from typing import Generator, List, Any, Match
+
+from jsonpath_ng.ext import parse
 
 
 # Setup logger
@@ -12,7 +16,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
-# TODO: Model objects
+# Model objects
 class JSONManifest:
     """
     This object acts as a container for a JSON document. Instances of this 
@@ -41,7 +45,38 @@ class JSONManifest:
         A dictionary where the keys are the target paths and the values are
         the values, after the transformation has occurred.
     """
-    pass
+    
+    # Instance attributes
+    @property
+    def data(self) -> dict:
+        """Return a copy of the internal read-only _data attributes."""
+        return copy(self._data)
+    
+    @property
+    def rules(self) -> list:
+        """Return a copy of the internal read-only _rules attribute."""
+        return copy(self._rules)
+    
+    @property
+    def items(self) -> list:
+        """Return a dictionary of the mapped data, per the given rules."""
+        return dict(iter(self))
+    
+    def __init__(self, data:dict=None, rules:list=None):
+        data = {} if data is None else data
+        rules = [] if rules is None else rules
+        self._data, self._rules = data, rules
+    
+    def __iter__(self):
+        """Iterate rules and items, yielding matches only."""
+        for rule in self._rules:
+            values = [
+                match.value for match in parse(rule.get('source'))
+                .find(self.data)
+            ]
+            if rule.get('target') and len(values) >= 1:
+                # print(json.dumps(rule.get('target'), indent=2), value)
+                yield json.dumps(rule.get('target'), indent=2), values
 
 # TODO: Factory objects
 class JSONFactory:
@@ -50,7 +85,6 @@ class JSONFactory:
     recombine all mapped values back into a valid JSON document. This 
     recombined JSON document is referred to as a "Projection" or a 
     "Projected JSON".
-
 
     Parameters
     ----------
@@ -65,4 +99,232 @@ class JSONFactory:
     RE_IDX : dict{str:str}
         A dictionary which represents the group names of `RE_PAT`.
     """
-    pass
+    
+    # Class attributes
+    _vals = r"(?:['\"]\s*[\w\.\s-]+\s*['\"]|\d+|true|false|null)"
+    _query = fr"(?:@\.\w+\s*==\s*{_vals})"
+
+    _stmt_index = r"(?P<index>\d+)"
+    _stmt_query = fr"(?P<query>\?\({_query}(?:\s*&&\s*{_query})*\))"
+
+    RE_PAT = re.compile(
+        fr"\.(?P<key>\w+)(?:\[(?:{_stmt_index}|{_stmt_query})\])*"
+    )   # Super nasty regex pattern, so split into smaller patterns
+    RE_IDX = RE_PAT.groupindex
+
+    # Class methods
+    @classmethod
+    def parse_path(cls, path):
+        """Parse paths, indices, and queries from a valid JSONPath.
+        Parameters
+        ----------
+        path : str
+            The valid JSONPath to parse out keys, indicies, and queries from.
+        Returns
+        -------
+        dict{str:str}
+            Returns a dictionary where the keys and values are the group names
+            and the result, if any otherwise None, found from the regex
+            operation.
+        """
+        matches = []
+        for match in cls.RE_PAT.findall(path):
+            match = [_ if _ != '' else None for _ in match]
+            matches.append(dict(zip(cls.RE_IDX, match)))
+        return matches
+
+    @classmethod
+    def insert_value(cls, path, value, record=None):
+        """Insert a value at a specfied path into the given record.
+        Parameters
+        ----------
+        path : str
+            The path to insert the value at.
+        value : any
+            The value to insert.
+        record : dict{str:any}
+            The record to insert the value into.
+        Returns
+        -------
+        dict{str:any}
+            Returns the updated record.
+        """
+        record = {} if record is None else record
+
+        def _get_index(key):
+            matches = re.search(r"\[(?P<index>\d+)\]", key)
+            if matches:
+                return (
+                    key.replace(matches.group(), ''),
+                    int(matches.group('index')),
+                )
+            return None, None
+
+        def _iter(keys=None, reference=None):
+            keys = [] if keys is None else keys
+            reference = {} if reference is None else reference
+
+            if not keys:
+                return
+
+            key = keys.pop(0)
+            index = _get_index(key)
+
+            if index:
+                key, idx = index
+                if not key in reference:
+                    reference[key] = []
+
+                rlen = len(reference[key])
+                if rlen <= idx: # TODO: "TypeError: '<=' not supported between instances of 'int' and 'NoneType'"
+                    for _ in range(idx + 1 - rlen):
+                        reference[key].append({})
+
+                ref = reference[key][idx]
+                reference[key][idx] = _iter(keys, ref) if keys else value
+
+            else:
+                ref = reference.get(key, {})
+                reference[key] = _iter(keys, ref) if keys else value
+
+            return reference
+
+        path_keys = path.split('.')
+        if path_keys[0] == '$':
+            path_keys.pop(0)
+
+        record = _iter(path_keys, record)
+        return record
+
+    @classmethod
+    def insert_query(cls, path, value, record=None):
+        """Insert a value at a specfied path into the given record.
+        This method is very similar to insert_value except it assumes the
+        path includes a query. This method will then perform very similarly
+        to insert_value, except it will ensure that the query is met when
+        the value is inserted.
+        Parameters
+        ----------
+        path : str
+            The path to insert the value at.
+        value : any
+            The value to insert.
+        record : dict{str:any}
+            The record to insert the value into.
+        Returns
+        -------
+        dict{str:any}
+            Returns the updated record.
+        """
+        record = {} if record is None else record
+
+        def _iter(keys=None, reference=None):
+            keys = [] if keys is None else keys
+            reference = {} if reference is None else reference
+            key, index, query = keys.pop(0).values()
+
+            # convert index to integer, if exists
+            if index is not None:
+                index = int(index)
+
+            # 4 possible cases:
+            #    (a) query w/ index :     process query and update only that index from result
+            #    (b) query w/o index: :   process query and update all values
+            #    (c) just index :         grab just that index
+            #    (d) only a key given :   treat like a dict key and update that value
+
+            if query is not None:
+                conditions = [
+                    tuple(
+                        t.strip()
+                        .replace('@.', '')
+                        .replace('\'', '')
+                        .replace('"', '')
+                        .strip()
+                        for t in s.strip().split('==')
+                    )
+                    for s in query[2:-1].split('&&')
+                ]
+
+                if not key in reference:
+                    reference[key] = []
+
+                indices = []
+                for i, ele in enumerate(reference[key]):
+                    if all(ele.get(k) == v for k, v in conditions):
+                        indices.append(i)
+
+                if index is not None:
+                    rlen = len(indices)
+                    if rlen <= index:
+                        for _ in range(index + 1 - rlen):
+                            reference[key].append(dict(conditions))
+                        indices.append(-1)
+                        index = -1
+
+                    ref = reference[key][indices[index]]
+                    reference[key][indices[index]] = (
+                        _iter(keys, ref) if keys else value
+                    )
+                else:
+                    if not indices:
+                        reference[key].append(dict(conditions))
+                        indices.append(-1)
+
+                    for idx in indices:
+                        ref = reference[key][idx]
+                        reference[key][idx] = (
+                            _iter(list(keys), ref) if keys else value
+                        )
+
+            elif index is not None:
+                if not key in reference:
+                    reference[key] = []
+
+                rlen = len(reference[key])
+                if rlen <= index:
+                    for _ in range(index + 1 - rlen):
+                        reference[key].append(
+                            {}
+                        )  # Change to type of child element
+
+                ref = reference[key][index]
+                reference[key][index] = _iter(keys, ref) if keys else value
+
+            else:
+                ref = reference.get(key, {})
+                reference[key] = _iter(keys, ref) if keys else value
+
+            return reference
+
+        path_keys = cls.parse_path(path)
+        record = _iter(path_keys, record)
+
+        return record
+
+    # Instance attributes
+    def __init__(self, manifest: JSONManifest):
+        self._manifest = manifest
+
+    # Instance methods
+    def get_projection(self):
+        """Generate the projection for the given manifest.
+        Returns
+        -------
+        dict{str:any}
+            Returns the generated projected json for the given manifest.
+        """
+        queries, record = [], {}
+        for path, value in self._manifest:
+
+            # Prioritize non-queries before queries
+            if '?' in path:
+                queries.append((path, value))
+                continue
+
+            self.insert_value(path, value, record)
+
+        for path, value in queries:
+            self.insert_query(path, value, record)
+
+        return record

@@ -1,14 +1,14 @@
 [
   {
     "source": "$..book..title",
-    "target": "$.reports[?(@.title == 'Checkouts Report')].books.title"
+    "target": "$.reports.title['Checkouts Report'].books.title"
   },
   {
     "source": "$..book..author",
-    "target": "$.reports[?(@.title == 'Checkouts Report')].books.author"
+    "target": "$.reports.title['Checkouts Report'].books.author"
   },
   {
     "source": "$..book..price",
-    "target": "$.reports[?(@.title == 'Checkouts Report')].books.price"
+    "target": "$.reports.title['Checkouts Report'].books.price"
   }
 ]
