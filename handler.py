@@ -18,6 +18,20 @@ def main(event, context=None):
     """
     Handle JSON payload event data and return dict as JSON.
 
+    The generated report has the following form:
+
+    ```json
+    {
+        "reports": [
+            {
+                "title": "<the report title>",
+                ...
+            },
+            ...
+        ]
+    }
+    ```
+
     Parameters
     ----------
     event : dict
@@ -58,7 +72,7 @@ def main(event, context=None):
 
     logger.info('Service received books: %s', json.dumps(books, indent=2))
 
-    # TODO: Generate reports
+    # Generate reports
     reports = []
     for book in books:
         manifest = JSONManifest(book, rules)
@@ -71,5 +85,7 @@ def main(event, context=None):
             'Generated projection: %s', json.dumps(projection, indent=2)
         )
 
-    # Reformat output and return
+        reports.extend(projection.get('reports', []))
+
+    # Format output and return
     return {'reports': reports}

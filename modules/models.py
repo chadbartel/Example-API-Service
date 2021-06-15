@@ -4,11 +4,8 @@
 # Import libraries
 import re
 import logging
-import json
 from copy import copy
-from typing import Generator, List, Any, Match
-
-from jsonpath_ng.ext import parse
+from typing import Generator, List, Any
 
 
 # Setup logger
@@ -51,32 +48,64 @@ class JSONManifest:
     def data(self) -> dict:
         """Return a copy of the internal read-only _data attributes."""
         return copy(self._data)
-    
+
     @property
     def rules(self) -> list:
         """Return a copy of the internal read-only _rules attribute."""
         return copy(self._rules)
-    
+
     @property
     def items(self) -> list:
         """Return a dictionary of the mapped data, per the given rules."""
         return dict(iter(self))
-    
-    def __init__(self, data:dict=None, rules:list=None):
+
+    def __init__(self, data: dict = None, rules: list = None):
         data = {} if data is None else data
         rules = [] if rules is None else rules
         self._data, self._rules = data, rules
-    
+
+        # Flatten source data for faster parsing
+        self._fdata = dict(self.flatten(self._data))
+
     def __iter__(self):
-        """Iterate rules and items, yielding matches only."""
+        """Iterate on the rules and items, yielding only those which match."""
         for rule in self._rules:
-            values = [
-                match.value for match in parse(rule.get('source'))
-                .find(self.data)
-            ]
-            if rule.get('target') and len(values) >= 1:
-                # print(json.dumps(rule.get('target'), indent=2), value)
-                yield json.dumps(rule.get('target'), indent=2), values
+            for path, value in self._fdata.items():
+                if rule.get('source') == path:
+                    yield rule.get('target'), value
+
+    # Static methods
+    @staticmethod
+    def flatten(data: dict) -> Generator:
+        """Flatten the given dictionary to a list of paths and values.
+        Parameters
+        ----------
+        data : dict{str:any}
+            The data dictionary which should be flattened.
+        Returns
+        -------
+        Generator
+            Returns a generator, which when iterated on, will yield key-value
+            pairs where the values are the individual values from the ingested
+            data and the keys are the valid JSONPaths to those values.
+        """
+
+        def iter_child(cdata: Any, keys: List[str] = None):
+            keys = [] if keys is None else keys
+
+            if isinstance(cdata, dict):
+                for key, value in cdata.items():
+                    yield from iter_child(value, keys + [key])
+
+            elif isinstance(cdata, list):
+                for idx, value in enumerate(cdata):
+                    key = f'{keys[-1]}[{str(idx)}]'
+                    yield from iter_child(value, keys[:-1] + [key])
+
+            else:
+                yield '.'.join(keys), cdata
+
+        yield from iter_child(data, ['$'])
 
 # TODO: Factory objects
 class JSONFactory:
@@ -109,7 +138,7 @@ class JSONFactory:
 
     RE_PAT = re.compile(
         fr"\.(?P<key>\w+)(?:\[(?:{_stmt_index}|{_stmt_query})\])*"
-    )   # Super nasty regex pattern, so split into smaller patterns
+    )
     RE_IDX = RE_PAT.groupindex
 
     # Class methods
@@ -176,7 +205,7 @@ class JSONFactory:
                     reference[key] = []
 
                 rlen = len(reference[key])
-                if rlen <= idx: # TODO: "TypeError: '<=' not supported between instances of 'int' and 'NoneType'"
+                if rlen <= idx:
                     for _ in range(idx + 1 - rlen):
                         reference[key].append({})
 
