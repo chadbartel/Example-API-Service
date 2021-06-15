@@ -1,0 +1,14 @@
+{
+  "reports": [
+    {
+      "title": "Checkouts Report",
+      "books": [
+        {
+          "title": "Sayings of the Century",
+          "author": "Nigel Rees",
+          "price": 8.95
+        }
+      ]
+    }
+  ]
+}
