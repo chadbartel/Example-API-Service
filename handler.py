@@ -5,8 +5,15 @@
 import json
 import logging
 
+from yaml import dump
+try:
+    from yaml import CDumper as Dumper
+except ImportError:
+    from yaml import Dumper
+
 from modules.dal import Project
 from modules.models import JSONFactory, JSONManifest
+from modules.config import Config
 
 
 # Setup logger
@@ -46,10 +53,18 @@ def main(event, context=None):
     event = {} if event is None else event
     logger.info('Service invoked by event: %s', json.dumps(event, indent=2))
 
-    # Load all rules
-    project = Project()
-    rules = [rule for _ in project.mappings.values() for rule in _]
+    # Load configuration
+    config = Config()
+    print(config.data)
+    logger.info('Service loaded config: %s', dump(config.data, Dumper=Dumper))
+
+    # Parse rules from configuration
+    rules = [rule for _ in config.get('queries')]
     logger.info('Service loaded rules: %s', json.dumps(rules, indent=2))
+
+    # Load all rules
+    # project = Project()
+    # rules = [rule for _ in project.mappings.values() for rule in _]
 
     books = []
     for record in event.get('Records', [{}]):

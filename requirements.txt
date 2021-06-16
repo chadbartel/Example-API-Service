@@ -1,0 +1,5 @@
+decorator==5.0.9
+jsonpath-ng==1.5.2
+ply==3.11
+PyYAML==5.4.1
+six==1.16.0

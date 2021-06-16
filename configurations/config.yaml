@@ -1,0 +1,13 @@
+reports:
+  checkouts:
+    title: Checkouts Report
+    queries:
+      title:
+        source: "$..book..title"
+        target: "{'title': 'Checkouts Report', 'books': [{ 'title': ''}]}"
+      author:
+        source: "$..book..author"
+        target: "{'title': 'Checkouts Report', 'books': [{ 'author': ''}]}"
+      price:
+        source: "$..book..price"
+        target: "{'title': 'Checkouts Report', 'books': [{ 'price': ''}]}"

@@ -64,11 +64,8 @@ class JSONManifest:
         rules = [] if rules is None else rules
         self._data, self._rules = data, rules
 
-        # Flatten source data for faster parsing
-        self._fdata = dict(self.flatten(self._data))
-
     def __iter__(self):
-        """Iterate on the rules and items, yielding only those which match."""
+        """Iterate on the rules and items."""
         for rule in self._rules:
             for path, value in self._fdata.items():
                 if rule.get('source') == path:
